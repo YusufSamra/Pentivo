@@ -47,7 +47,8 @@ def scan(request: ScanRequest):
             detail="Scan timed out."
         )
 
-    class EnumerateRequest(BaseModel):
+
+class EnumerateRequest(BaseModel):
     host: str
 
 
