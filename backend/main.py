@@ -72,3 +72,29 @@ def enumerate(request: EnumerateRequest):
             status_code=504,
             detail="Enumeration timed out."
         )
+
+    from pentest_engine.cve_lookup import enrich_with_cves
+
+
+class AnalyzeRequest(BaseModel):
+    host_range: str
+
+
+@app.post("/analyze")
+def analyze(request: AnalyzeRequest):
+    try:
+        enum_response = requests.post(
+            f"{KALI_AGENT_URL}/enumerate",
+            json={"host_range": request.host_range},
+            timeout=400
+        )
+        enum_response.raise_for_status()
+        enum_data = enum_response.json()
+
+        enriched = enrich_with_cves(enum_data["results"])
+
+        return {"results": enriched}
+    except requests.exceptions.ConnectionError:
+        raise HTTPException(status_code=503, detail="Cannot reach Kali agent. Is it running?")
+    except requests.exceptions.Timeout:
+        raise HTTPException(status_code=504, detail="Analysis timed out.")
