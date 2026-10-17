@@ -2,6 +2,8 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import requests
 
+from pentest_engine.cve_lookup import enrich_with_cves
+
 app = FastAPI(title="Pentivo API")
 
 KALI_AGENT_URL = "http://localhost:8001"
@@ -12,6 +14,10 @@ class ScanRequest(BaseModel):
 
 
 class EnumerateRequest(BaseModel):
+    host_range: str
+
+
+class AnalyzeRequest(BaseModel):
     host_range: str
 
 
@@ -50,6 +56,11 @@ def scan(request: ScanRequest):
             status_code=504,
             detail="Scan timed out."
         )
+    except requests.exceptions.HTTPError as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Kali agent returned an error: {e}"
+        )
 
 
 @app.post("/enumerate")
@@ -72,12 +83,11 @@ def enumerate(request: EnumerateRequest):
             status_code=504,
             detail="Enumeration timed out."
         )
-
-    from pentest_engine.cve_lookup import enrich_with_cves
-
-
-class AnalyzeRequest(BaseModel):
-    host_range: str
+    except requests.exceptions.HTTPError as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Kali agent returned an error: {e}"
+        )
 
 
 @app.post("/analyze")
@@ -95,6 +105,17 @@ def analyze(request: AnalyzeRequest):
 
         return {"results": enriched}
     except requests.exceptions.ConnectionError:
-        raise HTTPException(status_code=503, detail="Cannot reach Kali agent. Is it running?")
+        raise HTTPException(
+            status_code=503,
+            detail="Cannot reach Kali agent. Is it running?"
+        )
     except requests.exceptions.Timeout:
-        raise HTTPException(status_code=504, detail="Analysis timed out.")
+        raise HTTPException(
+            status_code=504,
+            detail="Analysis timed out."
+        )
+    except requests.exceptions.HTTPError as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Kali agent returned an error: {e}"
+        )
