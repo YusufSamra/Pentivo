@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import requests
+from ai_service.decision_engine import assess_all
 
 from pentest_engine.cve_lookup import enrich_with_cves
 
@@ -119,3 +120,16 @@ def analyze(request: AnalyzeRequest):
             status_code=502,
             detail=f"Kali agent returned an error: {e}"
         )
+
+
+class DecideRequest(BaseModel):
+    results: list
+
+
+@app.post("/decide")
+def decide(request: DecideRequest):
+    try:
+        assessments = assess_all(request.results)
+        return {"assessments": assessments}
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"AI service error: {e}")
