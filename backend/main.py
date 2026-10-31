@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import requests
 from ai_service.decision_engine import assess_all
+from pentest_engine.ranking_engine import rank_assessments
 
 from pentest_engine.cve_lookup import enrich_with_cves
 
@@ -133,3 +134,15 @@ def decide(request: DecideRequest):
         return {"assessments": assessments}
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"AI service error: {e}")
+
+
+class RankRequest(BaseModel):
+    assessments: list
+
+
+@app.post("/rank")
+def rank(request: RankRequest):
+    try:
+        return rank_assessments(request.assessments)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ranking error: {e}")
