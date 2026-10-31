@@ -41,9 +41,26 @@ Vulnerability details:
 Respond with the JSON object only."""
 
 
+def _normalize_label(value, allowed):
+    if not isinstance(value, str):
+        return None
+    value_clean = value.strip().lower()
+    for option in allowed:
+        if option.lower() == value_clean:
+            return option
+    return None
+
+
 def assess_vulnerability(context: dict) -> dict:
     prompt = build_vulnerability_prompt(context)
-    raw = llm.invoke(prompt)
+
+    try:
+        raw = llm.invoke(prompt)
+    except Exception as e:
+        return {
+            **context,
+            "error": f"AI call failed: {e}",
+        }
 
     try:
         ai_result = json.loads(raw)
@@ -53,6 +70,13 @@ def assess_vulnerability(context: dict) -> dict:
             "error": "Failed to parse AI response as JSON",
             "raw_response": raw
         }
+
+    ai_result["ai_severity"] = _normalize_label(
+        ai_result.get("ai_severity"), ["Critical", "High", "Medium", "Low"]
+    )
+    ai_result["exploitability_estimate"] = _normalize_label(
+        ai_result.get("exploitability_estimate"), ["Easy", "Moderate", "Hard"]
+    )
 
     return {**context, **ai_result}
 
