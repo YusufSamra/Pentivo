@@ -146,3 +146,43 @@ def rank(request: RankRequest):
         return rank_assessments(request.assessments)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ranking error: {e}")
+
+class RunRequest(BaseModel):
+    ranked: list
+
+
+@app.post("/run")
+def run(request: RunRequest):
+    target_item = None
+    for item in request.ranked:
+        if item.get("ready_to_execute"):
+            target_item = item
+            break
+
+    if not target_item:
+        return {
+            "executed": False,
+            "message": "No ranked vulnerability is ready to execute (no verified Metasploit module mapped)."
+        }
+
+    try:
+        response = requests.post(
+            f"{KALI_AGENT_URL}/execute",
+            json={
+                "target": target_item["host"],
+                "exploit_info": target_item["exploit_info"]
+            },
+            timeout=120
+        )
+        response.raise_for_status()
+        return {
+            "executed": True,
+            "target_item": target_item,
+            "result": response.json()
+        }
+    except requests.exceptions.ConnectionError:
+        raise HTTPException(status_code=503, detail="Cannot reach Kali agent. Is it running?")
+    except requests.exceptions.Timeout:
+        raise HTTPException(status_code=504, detail="Execution timed out.")
+    except requests.exceptions.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"Kali agent returned an error: {e}")
