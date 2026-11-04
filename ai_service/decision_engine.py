@@ -13,8 +13,8 @@ llm = OllamaLLM(
     base_url=OLLAMA_URL,
     format="json",
     temperature=0.1,
+    client_kwargs={"timeout": 90},
 )
-
 
 def build_vulnerability_prompt(context: dict) -> str:
     return f"""You are a cybersecurity risk analysis engine inside an automated penetration testing system.
