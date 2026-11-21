@@ -5,8 +5,7 @@ from langchain_ollama import OllamaLLM
 
 load_dotenv()
 
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://100.91.131.36:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:7b-instruct")
+from backend.config import OLLAMA_URL, OLLAMA_MODEL
 
 llm = OllamaLLM(
     model=OLLAMA_MODEL,

@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pentivo — Attack Dashboard</title>
+    <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #0B1120; color: #E6EDF3; }
+        header { background: #121A2E; padding: 16px 32px; border-bottom: 2px solid #00C896; display: flex; justify-content: space-between; align-items: center; }
+        header h1 { font-size: 20px; color: #fff; }
+        header .accent { color: #00C896; }
+        .controls { padding: 20px 32px; background: #121A2E; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+        input, button { padding: 10px 14px; border-radius: 6px; border: none; font-size: 14px; }
+        input { background: #1F2937; color: #fff; width: 320px; }
+        button { background: #00C896; color: #052e24; font-weight: bold; cursor: pointer; }
+        button:hover { background: #0E8F6F; color: #fff; }
+        .layout { display: flex; height: calc(100vh - 140px); }
+        #graph { flex: 2; background: #0B1120; }
+        .sidebar { flex: 1; background: #121A2E; padding: 20px; overflow-y: auto; border-left: 1px solid #1F2937; }
+        .sidebar h3 { color: #00C896; margin-bottom: 12px; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; }
+        .finding { background: #1F2937; padding: 12px; border-radius: 6px; margin-bottom: 10px; font-size: 13px; }
+        .finding .cve { color: #00C896; font-weight: bold; }
+        .finding .sev-critical { color: #E63946; font-weight: bold; }
+        .finding .sev-high { color: #F77F00; font-weight: bold; }
+        .status { padding: 8px 32px; font-size: 13px; color: #8B98A5; background: #0B1120; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>PENT<span class="accent">IVO</span> — Attack Dashboard</h1>
+        <span id="session-label" style="font-size:13px;color:#8B98A5;">No active session</span>
+    </header>
+
+    <div class="controls">
+        <input type="text" id="target-input" placeholder="192.168.243.3,192.168.243.4" value="192.168.243.3">
+        <button onclick="runFullScan()">Run Full Analysis</button>
+        <button onclick="loadLatestSession()">Load Latest Session</button>
+    </div>
+
+    <div class="status" id="status">Ready.</div>
+
+    <div class="layout">
+        <div id="graph"></div>
+        <div class="sidebar">
+            <h3>Findings</h3>
+            <div id="findings-list">
+                <p style="color:#5B6B82;font-size:13px;">Run an analysis to see results.</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = "http://127.0.0.1:8000";
+        let network = null;
+
+        function setStatus(msg) {
+            document.getElementById("status").textContent = msg;
+        }
+
+        function buildGraph(findings) {
+            const nodes = [];
+            const edges = [];
+            const hostSet = new Set();
+
+            nodes.push({ id: "attacker", label: "Pentivo\\n(Attacker)", color: "#00C896", shape: "box", font: { color: "#052e24" } });
+
+            findings.forEach((f, idx) => {
+                if (!hostSet.has(f.host)) {
+                    hostSet.add(f.host);
+                    nodes.push({ id: "host-" + f.host, label: f.host, color: "#1F2937", font: { color: "#fff" }, shape: "box" });
+                    edges.push({ from: "attacker", to: "host-" + f.host, color: "#374151" });
+                }
+
+                if (f.ready_to_execute) {
+                    const nodeId = "cve-" + idx;
+                    const sevColor = f.severity === "CRITICAL" ? "#E63946" : "#F77F00";
+                    nodes.push({
+                        id: nodeId,
+                        label: f.cve_id + "\\n" + (f.product || ""),
+                        color: sevColor,
+                        font: { color: "#fff", size: 11 },
+                        shape: "dot",
+                        size: 18
+                    });
+                    edges.push({ from: "host-" + f.host, to: nodeId, color: sevColor, dashes: true });
+                }
+            });
+
+            const container = document.getElementById("graph");
+            const data = { nodes: new vis.DataSet(nodes), edges: new vis.DataSet(edges) };
+            const options = {
+                physics: { stabilization: true, barnesHut: { gravitationalConstant: -8000 } },
+                nodes: { borderWidth: 0 },
+                edges: { smooth: true, arrows: "to" }
+            };
+            network = new vis.Network(container, data, options);
+        }
+
+        function renderFindings(findings) {
+            const list = document.getElementById("findings-list");
+            if (!findings.length) {
+                list.innerHTML = '<p style="color:#5B6B82;">No findings.</p>';
+                return;
+            }
+            list.innerHTML = "";
+            findings.forEach(f => {
+                const sevClass = f.severity === "CRITICAL" ? "sev-critical" : "sev-high";
+                const ready = f.ready_to_execute ? '<span style="color:#00C896;">● Ready</span>' : '';
+                const div = document.createElement("div");
+                div.className = "finding";
+                div.innerHTML = `
+                    <div class="cve">${f.cve_id || ""}</div>
+                    <div>${f.host} · ${f.product || ""} ${f.version || ""}</div>
+                    <div><span class="${sevClass}">${f.severity || ""}</span> · CVSS ${f.cvss_score || "?"} · Priority ${f.priority_score || "?"}</div>
+                    <div>${ready}</div>
+                `;
+                list.appendChild(div);
+            });
+        }
+
+        async function loadSession(sessionId) {
+            setStatus("Loading session " + sessionId + "...");
+            try {
+                const res = await fetch(`${API_BASE}/sessions/${sessionId}/findings`);
+                const data = await res.json();
+                const findings = data.findings || [];
+                document.getElementById("session-label").textContent = "Session #" + sessionId + " · " + findings.length + " findings";
+                buildGraph(findings);
+                renderFindings(findings);
+                setStatus("Loaded " + findings.length + " findings from session " + sessionId + ".");
+            } catch (e) {
+                setStatus("Error loading session: " + e.message);
+            }
+        }
+
+        async function loadLatestSession() {
+            setStatus("Fetching latest session...");
+            try {
+                const res = await fetch(`${API_BASE}/sessions`);
+                const data = await res.json();
+                const sessions = data.sessions || [];
+                if (!sessions.length) {
+                    setStatus("No sessions found. Run an analysis first.");
+                    return;
+                }
+                await loadSession(sessions[0].id);
+            } catch (e) {
+                setStatus("Error: " + e.message + " (is the backend running?)");
+            }
+        }
+
+        async function runFullScan() {
+            const target = document.getElementById("target-input").value.trim();
+            if (!target) { setStatus("Enter a target first."); return; }
+            setStatus("Running full analysis on " + target + "... this may take several minutes.");
+            try {
+                const res = await fetch(`${API_BASE}/full_run`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ target_range: target })
+                });
+                if (!res.ok) throw new Error("HTTP " + res.status);
+                const data = await res.json();
+                setStatus("Analysis complete. Session #" + data.session_id);
+                await loadSession(data.session_id);
+            } catch (e) {
+                setStatus("Error during analysis: " + e.message);
+            }
+        }
+    </script>
+</body>
+</html>

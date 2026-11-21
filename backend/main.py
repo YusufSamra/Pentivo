@@ -3,13 +3,36 @@ from pydantic import BaseModel
 import requests
 from ai_service.decision_engine import assess_all
 from pentest_engine.ranking_engine import rank_assessments
-
+from pentest_engine.decision_loop import decide_next_action
 from pentest_engine.cve_lookup import enrich_with_cves
+from fastapi.responses import HTMLResponse
+from backend.report_generator import generate_html_report
+from fastapi.middleware.cors import CORSMiddleware
+from backend.orchestrator import run_full_pipeline
+
+
+from backend.database import (
+    init_db, create_scan_session, update_session_status,
+    save_findings, save_execution,
+    get_session_findings, get_session_executions, get_all_sessions
+)
+
 
 app = FastAPI(title="Pentivo API")
 
-KALI_AGENT_URL = "http://localhost:8001"
+app = FastAPI(title="Pentivo API")
 
+init_db()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+from backend.config import KALI_AGENT_URL, backend_timeout_for
 
 class ScanRequest(BaseModel):
     target_range: str
@@ -71,8 +94,7 @@ def enumerate(request: EnumerateRequest):
         response = requests.post(
             f"{KALI_AGENT_URL}/enumerate",
             json={"host_range": request.host_range},
-            timeout=400
-        )
+            timeout=backend_timeout_for(request.host_range)        )
         response.raise_for_status()
         return response.json()
     except requests.exceptions.ConnectionError:
@@ -98,8 +120,8 @@ def analyze(request: AnalyzeRequest):
         enum_response = requests.post(
             f"{KALI_AGENT_URL}/enumerate",
             json={"host_range": request.host_range},
-            timeout=400
-        )
+            timeout=backend_timeout_for(request.host_range)        
+            )
         enum_response.raise_for_status()
         enum_data = enum_response.json()
 
@@ -198,8 +220,8 @@ def analyze_result(request: AnalyzeResultRequest):
         response = requests.post(
             f"{KALI_AGENT_URL}/analyze_result",
             json={"execution_result": request.execution_result},
-            timeout=60
-        )
+            timeout=backend_timeout_for(request.host_range)     
+               )
         response.raise_for_status()
         return response.json()
     except requests.exceptions.ConnectionError:
@@ -208,3 +230,50 @@ def analyze_result(request: AnalyzeResultRequest):
         raise HTTPException(status_code=504, detail="Result analysis timed out.")
     except requests.exceptions.HTTPError as e:
         raise HTTPException(status_code=502, detail=f"Kali agent returned an error: {e}")
+
+
+class NextActionRequest(BaseModel):
+    analysis_result: dict
+    ranked_list: list
+    current_index: int
+
+
+@app.post("/next_action")
+def next_action(request: NextActionRequest):
+    try:
+        return decide_next_action(
+            request.analysis_result,
+            request.ranked_list,
+            request.current_index,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Decision loop error: {e}")
+
+
+@app.get("/sessions")
+def list_sessions():
+    return {"sessions": get_all_sessions()}
+
+
+@app.get("/sessions/{session_id}/findings")
+def session_findings(session_id: int):
+    return {"findings": get_session_findings(session_id)}
+
+
+@app.get("/sessions/{session_id}/executions")
+def session_executions(session_id: int):
+    return {"executions": get_session_executions(session_id)}
+
+
+@app.get("/sessions/{session_id}/report", response_class=HTMLResponse)
+def session_report(session_id: int):
+    return generate_html_report(session_id)
+
+
+class FullRunRequest(BaseModel):
+    target_range: str
+
+
+@app.post("/full_run")
+def full_run(request: FullRunRequest):
+    return run_full_pipeline(request.target_range, ai_decide_url=None)

@@ -4,3 +4,5 @@ __pycache__/
 .env
 nvd_cache/
 node_modules/
+pentivo.db
+logs/
